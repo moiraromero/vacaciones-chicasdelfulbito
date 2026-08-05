@@ -1,7 +1,8 @@
 import streamlit as st
 from datetime import datetime, date, timedelta
 import pandas as pd
-from streamlit_gsheets import GSheetsConnection
+import gspread
+from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Vacaciones 2027", page_icon="✈️")
 
@@ -9,14 +10,30 @@ TOTAL_REQUERIDO = 11
 
 st.title("✈️ Organizador de Vacaciones")
 
-# --- CONEXIÓN CON GOOGLE SHEETS ---
-conn = st.connection("gsheets", type=GSheetsConnection)
+# --- CONEXIÓN A GOOGLE SHEETS VIA GSPREAD ---
+@st.cache_resource
+def get_gsheet_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    credentials = Credentials.from_service_account_info(
+        st.secrets["gcp_service_account"],
+        scopes=scopes
+    )
+    client = gspread.authorize(credentials)
+    return client
+
+def obtener_sheet():
+    client = get_gsheet_client()
+    url = st.secrets["sheets"]["spreadsheet_url"]
+    return client.open_by_url(url).sheet1
 
 def cargar_respuestas():
-    # Lee la planilla de Google Sheets
     try:
-        df = conn.read(ttl=0) # ttl=0 asegura leer los datos en tiempo real sin caché
-        return df
+        sheet = obtener_sheet()
+        records = sheet.get_all_records()
+        return pd.DataFrame(records)
     except Exception:
         return pd.DataFrame(columns=["Nombre", "Fecha_Inicio", "Fecha_Fin"])
 
@@ -43,16 +60,12 @@ if st.button("💾 Guardar mis fechas", type="primary"):
     elif nombre in personas_votaron:
         st.warning(f"⚠️ {nombre}, ya habías cargado tus fechas.")
     else:
-        # Crear nueva fila
-        nueva_fila = pd.DataFrame([{
-            "Nombre": nombre,
-            "Fecha_Inicio": rango_actual[0].strftime("%Y-%m-%d"),
-            "Fecha_Fin": rango_actual[1].strftime("%Y-%m-%d")
-        }])
+        sheet = obtener_sheet()
+        f_inicio = rango_actual[0].strftime("%Y-%m-%d")
+        f_fin = rango_actual[1].strftime("%Y-%m-%d")
         
-        # Concatenar con los datos existentes y guardar en Google Sheets
-        df_actualizado = pd.concat([df_respuestas, nueva_fila], ignore_index=True)
-        conn.update(data=df_actualizado)
+        # Guardar la nueva fila directamente en la planilla
+        sheet.append_row([nombre, f_inicio, f_fin])
         
         st.success(f"¡Listo {nombre}! Fechas registradas.")
         st.rerun()
@@ -68,10 +81,9 @@ if cant_respuestas > 0:
 if cant_respuestas >= TOTAL_REQUERIDO:
     st.subheader("🎉 ¡Todas respondieron! Analizando coincidencias...")
     
-    # Reconstruir los sets de fechas por persona
     dicc_dias = {}
     for _, row in df_respuestas.iterrows():
-        n = row["Nombre"]
+        n = str(row["Nombre"])
         f_i = datetime.strptime(str(row["Fecha_Inicio"]), "%Y-%m-%d").date()
         f_f = datetime.strptime(str(row["Fecha_Fin"]), "%Y-%m-%d").date()
         
@@ -90,9 +102,3 @@ if cant_respuestas >= TOTAL_REQUERIDO:
         st.success(f"### 📅 Coincidencia encontrada:\nDel **{dias_ord[0].strftime('%d/%m/%Y')}** al **{dias_ord[-1].strftime('%d/%m/%Y')}**.")
     else:
         st.error("❌ No hay ninguna fecha en la que coincidan las 11 personas al mismo tiempo.")
-
-# Reiniciar por si quieren volver a empezar
-if st.button("Reiniciar votación general"):
-    st.session_state.respuestas = {}
-    st.session_state.mis_rangos = []
-    st.rerun()
