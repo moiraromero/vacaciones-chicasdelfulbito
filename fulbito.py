@@ -47,18 +47,16 @@ cant_respuestas = len(personas_votaron)
 nombre = st.text_input("Tu nombre:").strip()
 
 rango_actual = st.date_input(
-    "Seleccioná un rango de fechas:",
+    "Seleccioná un rango de fechas disponible:",
     value=(date.today(), date.today() + timedelta(days=7)),
     format="DD/MM/YYYY"
 )
 
-if st.button("💾 Guardar mis fechas", type="primary"):
+if st.button("💾 Guardar rango de fechas", type="primary"):
     if not nombre:
         st.error("Por favor ingresá tu nombre.")
     elif len(rango_actual) != 2:
-        st.error("Seleccioná un rango completo.")
-    elif nombre in personas_votaron:
-        st.warning(f"⚠️ {nombre}, ya habías cargado tus fechas.")
+        st.error("Seleccioná un rango completo (fecha inicial y final).")
     else:
         sheet = obtener_sheet()
         f_inicio = rango_actual[0].strftime("%Y-%m-%d")
@@ -67,28 +65,29 @@ if st.button("💾 Guardar mis fechas", type="primary"):
         # Guardar la nueva fila directamente en la planilla
         sheet.append_row([nombre, f_inicio, f_fin])
         
-        st.success(f"¡Listo {nombre}! Fechas registradas.")
+        st.success(f"¡Listo {nombre}! Rango guardado correctamente. Podés agregar más si querés.")
         st.rerun()
 
 # --- ESTADO DE LA VOTACIÓN ---
 st.divider()
-st.metric(label="Personas que ya cargaron", value=f"{cant_respuestas} / {TOTAL_REQUERIDO}")
+st.metric(label="Personas que ya cargaron sus fechas", value=f"{cant_respuestas} / {TOTAL_REQUERIDO}")
 
 if cant_respuestas > 0:
-    st.write("**Ya respondieron:**", ", ".join(personas_votaron))
+    st.write("**Ya cargaron disponibilidad:**", ", ".join(personas_votaron))
 
-# --- CÁLCULO FINAL (Cuando llegan a 11) ---
+# --- CÁLCULO FINAL (Cuando se llega a la cantidad requerida de personas únicas) ---
 if cant_respuestas >= TOTAL_REQUERIDO:
     st.subheader("🎉 ¡Todas respondieron! Analizando coincidencias...")
     
     dicc_dias = {}
     for _, row in df_respuestas.iterrows():
-        n = str(row["Nombre"])
+        n = str(row["Nombre"]).strip()
         f_i = datetime.strptime(str(row["Fecha_Inicio"]), "%Y-%m-%d").date()
         f_f = datetime.strptime(str(row["Fecha_Fin"]), "%Y-%m-%d").date()
         
         dias = {f_i + timedelta(days=i) for i in range((f_f - f_i).days + 1)}
         
+        # Si la persona ya cargó un rango previo, se unen los días de disponibilidad
         if n in dicc_dias:
             dicc_dias[n].update(dias)
         else:
