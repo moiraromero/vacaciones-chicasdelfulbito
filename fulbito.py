@@ -1,97 +1,95 @@
 import streamlit as st
 from datetime import datetime, date, timedelta
+import pandas as pd
+from streamlit_gsheets import GSheetsConnection
 
 st.set_page_config(page_title="Vacaciones 2027", page_icon="✈️")
 
 TOTAL_REQUERIDO = 11
 
 st.title("✈️ Organizador de Vacaciones")
-st.write(f"Ingresá tus fechas disponibles. Cuando respondan las **{TOTAL_REQUERIDO} personas**, la app mostrará las coincidencias.")
 
-# --- ESTADO GLOBAL (Persistente entre usuarios) ---
-if "respuestas" not in st.session_state:
-    st.session_state.respuestas = {}  # { "Nombre": set(dias) }
+# --- CONEXIÓN CON GOOGLE SHEETS ---
+conn = st.connection("gsheets", type=GSheetsConnection)
 
-# --- ESTADO TEMPORAL DE SESIÓN (Para la persona actual) ---
-if "mis_rangos" not in st.session_state:
-    st.session_state.mis_rangos = []  # Lista de rangos cargados antes de guardar
+def cargar_respuestas():
+    # Lee la planilla de Google Sheets
+    try:
+        df = conn.read(ttl=0) # ttl=0 asegura leer los datos en tiempo real sin caché
+        return df
+    except Exception:
+        return pd.DataFrame(columns=["Nombre", "Fecha_Inicio", "Fecha_Fin"])
 
+df_respuestas = cargar_respuestas()
+
+# --- CÁLCULO DE QUIÉNES YA VOTARON ---
+personas_votaron = df_respuestas["Nombre"].unique().tolist() if not df_respuestas.empty else []
+cant_respuestas = len(personas_votaron)
+
+# --- FORMULARIO ---
 nombre = st.text_input("Tu nombre:").strip()
 
-st.markdown("---")
-st.subheader("📅 Carga tus rangos de disponibilidad")
-
-# Selector de fechas individual
 rango_actual = st.date_input(
     "Seleccioná un rango de fechas:",
     value=(date.today(), date.today() + timedelta(days=7)),
-    format="DD/MM/YYYY",
-    key="selector_fecha"
+    format="DD/MM/YYYY"
 )
 
-# Botón para ir sumando rangos
-if st.button("➕ Agregar este rango a mi lista"):
-    if len(rango_actual) == 2:
-        st.session_state.mis_rangos.append(rango_actual)
-        st.success(f"Rango agregado: {rango_actual[0].strftime('%d/%m')} al {rango_actual[1].strftime('%d/%m')}")
-    else:
-        st.error("Por favor seleccioná un rango completo (fecha de inicio y fin).")
-
-# Muestra los rangos agregados hasta el momento
-if st.session_state.mis_rangos:
-    st.write("**Tus rangos cargados:**")
-    for i, r in enumerate(st.session_state.mis_rangos, 1):
-        st.info(f"Opción {i}: Del {r[0].strftime('%d/%m/%Y')} al {r[1].strftime('%d/%m/%Y')}")
-
-# Botón final para confirmar y guardar en la base global
-st.markdown("---")
-if st.button("💾 Guardar TODAS mis fechas", type="primary"):
+if st.button("💾 Guardar mis fechas", type="primary"):
     if not nombre:
-        st.error("Por favor ingresá tu nombre arriba de todo.")
-    elif not st.session_state.mis_rangos:
-        st.error("Tenés que agregar al menos un rango de fechas.")
-    elif nombre in st.session_state.respuestas:
-        st.warning(f"⚠️ {nombre}, ya habías guardado tus fechas.")
+        st.error("Por favor ingresá tu nombre.")
+    elif len(rango_actual) != 2:
+        st.error("Seleccioná un rango completo.")
+    elif nombre in personas_votaron:
+        st.warning(f"⚠️ {nombre}, ya habías cargado tus fechas.")
     else:
-        # Generar el conjunto total de días combinando todos los rangos cargados
-        dias_totales = set()
-        for f_inicio, f_fin in st.session_state.mis_rangos:
-            actual = f_inicio
-            while actual <= f_fin:
-                dias_totales.add(actual)
-                actual += timedelta(days=1)
-
-        # Guardar en la estructura principal
-        st.session_state.respuestas[nombre] = dias_totales
+        # Crear nueva fila
+        nueva_fila = pd.DataFrame([{
+            "Nombre": nombre,
+            "Fecha_Inicio": rango_actual[0].strftime("%Y-%m-%d"),
+            "Fecha_Fin": rango_actual[1].strftime("%Y-%m-%d")
+        }])
         
-        # Limpiar la memoria temporal de rangos para el siguiente usuario
-        st.session_state.mis_rangos = []
-        st.success(f"¡Excelente {nombre}! Todos tus rangos fueron registrados.")
+        # Concatenar con los datos existentes y guardar en Google Sheets
+        df_actualizado = pd.concat([df_respuestas, nueva_fila], ignore_index=True)
+        conn.update(data=df_actualizado)
+        
+        st.success(f"¡Listo {nombre}! Fechas registradas.")
+        st.rerun()
 
 # --- ESTADO DE LA VOTACIÓN ---
 st.divider()
-cant_respuestas = len(st.session_state.respuestas)
 st.metric(label="Personas que ya cargaron", value=f"{cant_respuestas} / {TOTAL_REQUERIDO}")
 
 if cant_respuestas > 0:
-    st.write("**Ya respondieron:**", ", ".join(st.session_state.respuestas.keys()))
+    st.write("**Ya respondieron:**", ", ".join(personas_votaron))
 
-# --- RESULTADO FINAL (Cuando responden las 10) ---
+# --- CÁLCULO FINAL (Cuando llegan a 11) ---
 if cant_respuestas >= TOTAL_REQUERIDO:
-    st.subheader("🎉 ¡Todas respondieron! Buscando coincidencias...")
+    st.subheader("🎉 ¡Todas respondieron! Analizando coincidencias...")
     
-    # Intersección de todos los conjuntos de fechas
-    coincidencias = set.intersection(*st.session_state.respuestas.values())
+    # Reconstruir los sets de fechas por persona
+    dicc_dias = {}
+    for _, row in df_respuestas.iterrows():
+        n = row["Nombre"]
+        f_i = datetime.strptime(str(row["Fecha_Inicio"]), "%Y-%m-%d").date()
+        f_f = datetime.strptime(str(row["Fecha_Fin"]), "%Y-%m-%d").date()
+        
+        dias = {f_i + timedelta(days=i) for i in range((f_f - f_i).days + 1)}
+        
+        if n in dicc_dias:
+            dicc_dias[n].update(dias)
+        else:
+            dicc_dias[n] = dias
+            
+    coincidencias = set.intersection(*dicc_dias.values())
     
     if coincidencias:
-        dias_ordenados = sorted(list(coincidencias))
-        inicio_str = dias_ordenados[0].strftime("%d/%m/%Y")
-        fin_str = dias_ordenados[-1].strftime("%d/%m/%Y")
-        
+        dias_ord = sorted(list(coincidencias))
         st.balloons()
-        st.success(f"### 📅 Coincidencia encontrada:\nDel **{inicio_str}** al **{fin_str}** ({len(dias_ordenados)} días en total).")
+        st.success(f"### 📅 Coincidencia encontrada:\nDel **{dias_ord[0].strftime('%d/%m/%Y')}** al **{dias_ord[-1].strftime('%d/%m/%Y')}**.")
     else:
-        st.error("❌ No hay ninguna fecha en la que coincidan las 10 personas al mismo tiempo.")
+        st.error("❌ No hay ninguna fecha en la que coincidan las 11 personas al mismo tiempo.")
 
 # Reiniciar por si quieren volver a empezar
 if st.button("Reiniciar votación general"):
