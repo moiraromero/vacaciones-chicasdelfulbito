@@ -1,12 +1,13 @@
 import streamlit as st
 from datetime import datetime, date, timedelta
+from collections import Counter
 import pandas as pd
 import gspread
 from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Vacaciones 2027", page_icon="✈️")
 
-TOTAL_REQUERIDO = 11
+TOTAL_REQUERIDO = 4
 
 st.title("✈️ Organizador de Vacaciones")
 
@@ -74,10 +75,11 @@ st.metric(label="Personas que ya cargaron sus fechas", value=f"{cant_respuestas}
 if cant_respuestas > 0:
     st.write("**Ya cargaron disponibilidad:**", ", ".join(personas_votaron))
 
-# --- CÁLCULO FINAL (Cuando se llega a la cantidad requerida) ---
-if cant_respuestas >= TOTAL_REQUERIDO:
-    st.subheader("🎉 ¡Todas respondieron! Analizando coincidencias...")
+# --- CÁLCULO FINAL DE COINCIDENCIAS ---
+if cant_respuestas > 0:
+    st.subheader("📊 Análisis de coincidencias de fechas")
     
+    # Unificar los días disponibles de cada persona (evitando duplicados por usuario)
     dicc_dias = {}
     for _, row in df_respuestas.iterrows():
         n = str(row["Nombre"]).strip()
@@ -91,21 +93,50 @@ if cant_respuestas >= TOTAL_REQUERIDO:
         else:
             dicc_dias[n] = dias
             
-    coincidencias = set.intersection(*dicc_dias.values())
-    
-    if coincidencias:
-        dias_ord = sorted(list(coincidencias))
-        st.balloons()
-        st.success(f"### 📅 Coincidencia encontrada:\nDel **{dias_ord[0].strftime('%d/%m/%Y')}** al **{dias_ord[-1].strftime('%d/%m/%Y')}**.")
-    else:
-        st.error("❌ No hay ninguna fecha en la que coincidan las 11 personas al mismo tiempo.")
-
+    # Contar cuántas personas coinciden en cada fecha individual
+    conteo_dias = Counter()
+    for n, dias in dicc_dias.items():
+        for d in dias:
+            conteo_dias[d] += 1
+            
+    if conteo_dias:
+        max_personas = max(conteo_dias.values())
+        dias_maximos = sorted([d for d, cant in conteo_dias.items() if cant == max_personas])
+        
+        if max_personas == TOTAL_REQUERIDO:
+            st.balloons()
+            st.success(f"🎉 **¡Coincidencia perfecta de los {TOTAL_REQUERIDO}!**")
+        else:
+            st.warning(f"⚠️ Máxima coincidencia alcanzada: **{max_personas} de {cant_respuestas} personas** coinciden en los mismos días.")
+            
+        # Agrupar fechas consecutivas para mostrar rangos claros
+        rangos = []
+        if dias_maximos:
+            inicio = dias_maximos[0]
+            fin = dias_maximos[0]
+            
+            for d in dias_maximos[1:]:
+                if d == fin + timedelta(days=1):
+                    fin = d
+                else:
+                    rangos.append((inicio, fin))
+                    inicio = d
+                    fin = d
+            rangos.append((inicio, fin))
+            
+        st.write(f"**Mejores fechas encontradas ({max_personas} personas):**")
+        for r_inicio, r_fin in rangos:
+            dias_totales = (r_fin - r_inicio).days + 1
+            if r_inicio == r_fin:
+                st.write(f"• **{r_inicio.strftime('%d/%m/%Y')}** (1 día)")
+            else:
+                st.write(f"• Del **{r_inicio.strftime('%d/%m/%Y')}** al **{r_fin.strftime('%d/%m/%Y')}** ({dias_totales} días)")
+                
 # --- SECCIÓN DE RESETEO EN LA BARRA LATERAL ---
 with st.sidebar:
     st.header("⚙️ Opciones de administración")
     if st.button("🗑️ Resetear votación / Borrar datos"):
         sheet = obtener_sheet()
-        # Borra desde la fila 2 en adelante para mantener los encabezados
         sheet.resize(rows=1)
         st.success("¡Se borraron todas las respuestas!")
         st.rerun()
