@@ -7,7 +7,7 @@ from google.oauth2.service_account import Credentials
 
 st.set_page_config(page_title="Vacaciones 2027", page_icon="✈️")
 
-TOTAL_REQUERIDO = 4
+TOTAL_REQUERIDO = 11
 
 st.title("✈️ Organizador de Vacaciones")
 
