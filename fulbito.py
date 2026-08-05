@@ -3,7 +3,7 @@ from datetime import datetime, date, timedelta
 
 st.set_page_config(page_title="Vacaciones 2027", page_icon="✈️")
 
-TOTAL_REQUERIDO = 10
+TOTAL_REQUERIDO = 11
 
 st.title("✈️ Organizador de Vacaciones")
 st.write(f"Ingresá tus fechas disponibles. Cuando respondan las **{TOTAL_REQUERIDO} personas**, la app mostrará las coincidencias.")
