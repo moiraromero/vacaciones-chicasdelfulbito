@@ -62,10 +62,9 @@ if st.button("💾 Guardar rango de fechas", type="primary"):
         f_inicio = rango_actual[0].strftime("%Y-%m-%d")
         f_fin = rango_actual[1].strftime("%Y-%m-%d")
         
-        # Guardar la nueva fila directamente en la planilla
         sheet.append_row([nombre, f_inicio, f_fin])
         
-        st.success(f"¡Listo {nombre}! Rango guardado correctamente. Podés agregar más si querés.")
+        st.success(f"¡Listo {nombre}! Rango guardado correctamente.")
         st.rerun()
 
 # --- ESTADO DE LA VOTACIÓN ---
@@ -75,7 +74,7 @@ st.metric(label="Personas que ya cargaron sus fechas", value=f"{cant_respuestas}
 if cant_respuestas > 0:
     st.write("**Ya cargaron disponibilidad:**", ", ".join(personas_votaron))
 
-# --- CÁLCULO FINAL (Cuando se llega a la cantidad requerida de personas únicas) ---
+# --- CÁLCULO FINAL (Cuando se llega a la cantidad requerida) ---
 if cant_respuestas >= TOTAL_REQUERIDO:
     st.subheader("🎉 ¡Todas respondieron! Analizando coincidencias...")
     
@@ -87,7 +86,6 @@ if cant_respuestas >= TOTAL_REQUERIDO:
         
         dias = {f_i + timedelta(days=i) for i in range((f_f - f_i).days + 1)}
         
-        # Si la persona ya cargó un rango previo, se unen los días de disponibilidad
         if n in dicc_dias:
             dicc_dias[n].update(dias)
         else:
@@ -101,3 +99,13 @@ if cant_respuestas >= TOTAL_REQUERIDO:
         st.success(f"### 📅 Coincidencia encontrada:\nDel **{dias_ord[0].strftime('%d/%m/%Y')}** al **{dias_ord[-1].strftime('%d/%m/%Y')}**.")
     else:
         st.error("❌ No hay ninguna fecha en la que coincidan las 11 personas al mismo tiempo.")
+
+# --- SECCIÓN DE RESETEO EN LA BARRA LATERAL ---
+with st.sidebar:
+    st.header("⚙️ Opciones de administración")
+    if st.button("🗑️ Resetear votación / Borrar datos"):
+        sheet = obtener_sheet()
+        # Borra desde la fila 2 en adelante para mantener los encabezados
+        sheet.resize(rows=1)
+        st.success("¡Se borraron todas las respuestas!")
+        st.rerun()
